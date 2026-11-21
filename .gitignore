@@ -1,11 +1,18 @@
+# Build directories
+build/
+out/
+bin/
+dist/
+
 # Prerequisites
 *.d
 
-# Object files
+# Object & Windows resource files
 *.o
 *.ko
 *.obj
 *.elf
+*.res
 
 # Linker output
 *.ilk
@@ -41,6 +48,7 @@
 *.su
 *.idb
 *.pdb
+*.dwo
 
 # Kernel Module Compile Results
 *.mod*
@@ -51,5 +59,11 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
-# debug information files
-*.dwo
+# IDE & OS cache / temporary files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
