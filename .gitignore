@@ -35,6 +35,11 @@ dist/
 *.so.*
 *.dylib
 
+# OpenSSL runtime and import library bundled with the MinGW build
+!/libs/openssl/bin/
+!/libs/openssl/bin/libcrypto-4-x64.dll
+!/libs/openssl/lib/libcrypto.dll.a
+
 # Executables
 *.exe
 *.out
