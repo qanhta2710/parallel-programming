@@ -24,9 +24,8 @@ app/
 │   ├── ui.c                    # Giao diện Win32 thuần (5 khu vực: Input, OpenMP, Result, Table, Chart)
 │   ├── chart.c                 # Vẽ đồ thị đường GDI double-buffered cho 4 phương pháp
 │   ├── worker.c                # Điều phối chạy 1 mode hoặc Benchmark cả 4 mode
-│   ├── hash_utils.c            # Hỗ trợ OpenSSL (USE_OPENSSL=1) + Fallback thuần C
-│   ├── brute_force.c           # [QUANG ANH CHECK/SỬA] Index Mapping, 4 mode OpenMP & Auto Threads
-│   └── gomp_mingw_fix.c        # Workaround bug libgomp GCC 12.1.0 MinGW (PR105836)
+│   ├── hash_utils.c            # Tính MD5 / SHA1 bằng OpenSSL và đổi Hex <-> Bytes
+│   └── brute_force.c           # [QUANG ANH CHECK/SỬA] Index Mapping, 4 mode OpenMP & Auto Threads
 ├── resources/
 │   ├── app.manifest            # Bật Windows Visual Styles (Common Controls v6)
 │   └── app.rc                  # Resource nhúng manifest
@@ -54,16 +53,9 @@ mingw32-make test
 mingw32-make clean
 ```
 
-### Bật OpenSSL đúng yêu cầu đề bài (khi máy đã cài OpenSSL / libcrypto)
+### OpenSSL đi kèm dự án
 
-Mặc định, `src/hash_utils.c` dùng bộ fallback thuần C (RFC 1321 / FIPS 180-4) để build và chạy ngay mà không cần cài thêm thư viện. Khi đã cài OpenSSL cho MinGW/MSYS2, build lại với cờ `USE_OPENSSL=1`:
-
-```powershell
-mingw32-make clean
-mingw32-make USE_OPENSSL=1
-# Hoặc chỉ định thư mục OpenSSL cụ thể:
-# mingw32-make USE_OPENSSL=1 OPENSSL_DIR="C:/OpenSSL-Win64"
-```
+Với MinGW-w64 x64, `mingw32-make` dùng OpenSSL đi kèm trong `libs/openssl` và tự sao chép `libcrypto-4-x64.dll` vào `build/` cạnh file `.exe`.
 
 ---
 

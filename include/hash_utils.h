@@ -5,20 +5,13 @@
 #include <stdint.h>
 #include "config.h"
 
-/* ============================================================================
- * Module Hash (MD5 / SHA1)
- * - Khi bien dich voi -DUSE_OPENSSL: goi truc tiep MD5()/SHA1() cua OpenSSL.
- * - Khi bien dich mac dinh (chua cai OpenSSL): dung fallback thuan C tuong
- *   thich 100% ket qua (RFC 1321 / FIPS 180-4) de build va test ngay lap tuc.
- * ============================================================================ */
-
-/* Tra ve ten backend hash dang su dung ("OpenSSL" hoac "Built-in Fallback") */
+/* Tra ve ten thu vien hash dang su dung. */
 const char *hash_backend_name(void);
 
 /* Do dai digest theo byte: MD5 = 16, SHA1 = 20 */
 int hash_digest_length(HashAlgo algo);
 
-/* Tinh hash cua chuoi data (do dai len) va ghi mang byte ra out_digest */
+/* Tinh MD5 hoac SHA1 bang OpenSSL va ghi digest vao out_digest. */
 void hash_compute(HashAlgo algo, const char *data, size_t len, uint8_t *out_digest);
 
 /* Chuyen chuoi hex (VD: "90015098...") sang mang byte de so sanh nhanh bang memcmp.
