@@ -26,8 +26,8 @@
  *   - Quang Anh co the toi uu them trong file nay ma KHONG can sua code UI.
  * ============================================================================ */
 
-#define ATTEMPTS_FLUSH_MASK 0xFFFULL /* Flush attempts moi 4096 lan thu de giam atomic overhead */
-#define TRACE_SAMPLE_DT     0.015    /* Ghi diem do thi moi ~15ms (chi thread 0 thuc hien) */
+#define ATTEMPTS_FLUSH_MASK 0xFFFULL 
+#define TRACE_SAMPLE_DT     0.015    
 
 const char *exec_mode_name(ExecMode mode) {
     switch (mode) {
@@ -40,55 +40,11 @@ const char *exec_mode_name(ExecMode mode) {
     }
 }
 
-/* ----------------------------------------------------------------------------
- * Tu dong nhan dien nhan vat ly CPU va de xuat so luong toi uu (Auto Threads)
- * ---------------------------------------------------------------------------- */
-int brute_get_physical_cores(void) {
-    int logical = omp_get_max_threads();
-    if (logical < 1) logical = 1;
-
-#ifdef _WIN32
-    DWORD len = 0;
-    GetLogicalProcessorInformationEx(RelationProcessorCore, NULL, &len);
-    if (len > 0) {
-        BYTE *buf = (BYTE *)malloc(len);
-        if (buf) {
-            if (GetLogicalProcessorInformationEx(
-                    RelationProcessorCore,
-                    (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)buf,
-                    &len)) {
-                int cores = 0;
-                DWORD offset = 0;
-                while (offset < len) {
-                    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX info =
-                        (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)(buf + offset);
-                    if (info->Relationship == RelationProcessorCore) {
-                        cores++;
-                    }
-                    if (info->Size == 0) break;
-                    offset += info->Size;
-                }
-                free(buf);
-                if (cores >= 1) {
-                    return cores;
-                }
-            } else {
-                free(buf);
-            }
-        }
-    }
-#endif
-
-    return logical;
-}
+// Auto Threads
 
 int brute_recommend_threads(int charset_len, int max_length) {
-    int physical = brute_get_physical_cores();
     int logical  = omp_get_max_threads();
-    if (physical < 1) physical = 1;
-    if (logical < physical) logical = physical;
 
-    /* Tinh tong khong gian tim kiem sum_{L=1..max_length} K^L */
     unsigned long long total_space = 0;
     int overflowed = 0;
     if (charset_len > 0 && max_length > 0) {
@@ -102,20 +58,15 @@ int brute_recommend_threads(int charset_len, int max_length) {
         }
     }
 
-    /* Heuristic toi uu cho tac vu CPU-bound (MD5/SHA1):
-     * - Khong gian nho (< 2,000): 1 luong (tranh ton chi phi tao luong)
-     * - Khong gian trung binh nho (< 20,000): toi da 2 luong
-     * - Khong gian vua (< 100,000): toi da 4 luong (hoac physical cores)
-     * - Khong gian lon: dung dung so nhan vat ly (physical cores) de dat
-     *   Speedup cao nhat ma van giu Efficiency tot va giao dien UI muot. */
-    int rec = physical;
+    // Partition via searching space
+    int rec = logical - 2; // MAX = thread_nums - 2
     if (!overflowed) {
-        if (total_space < 2000ULL) {
+        if (total_space < 2000ULL) { // Searching space < 2000
             rec = 1;
-        } else if (total_space < 20000ULL) {
-            rec = (physical < 2) ? physical : 2;
-        } else if (total_space < 100000ULL) {
-            rec = (physical < 4) ? physical : 4;
+        } else if (total_space < 20000ULL) { // Searching space < 20000
+            rec = 2;
+        } else if (total_space < 100000ULL) { // Searching space < 100000
+            rec = 4;
         }
     }
 
@@ -124,9 +75,8 @@ int brute_recommend_threads(int charset_len, int max_length) {
     return rec;
 }
 
-/* ----------------------------------------------------------------------------
- * 1. Index Mapping: chuyen so nguyen index -> chuoi mat khau do dai `length`
- * ---------------------------------------------------------------------------- */
+// Index Mapping
+
 void index_to_password(
     unsigned long long index,
     int length,
@@ -141,24 +91,19 @@ void index_to_password(
     password[length] = '\0';
 }
 
-/* Tinh K^L co kiem tra tran so so voi LLONG_MAX (de dung an toan trong OpenMP for) */
 unsigned long long safe_power_u64(int base, int exp) {
     if (base <= 0 || exp < 0) return 0;
     unsigned long long result = 1ULL;
     unsigned long long b = (unsigned long long)base;
     for (int i = 0; i < exp; i++) {
         if (result > (unsigned long long)LLONG_MAX / b) {
-            return 0; /* Tran so */
+            return 0;
         }
         result *= b;
     }
     return result;
 }
 
-/* ----------------------------------------------------------------------------
- * 2. Luong xu ly tung index theo so do trang 6:
- *    index_to_password() -> hash_password() -> check_password() -> save_result()
- * ---------------------------------------------------------------------------- */
 static inline void hash_password(
     HashAlgo algo,
     const char *password,
@@ -182,7 +127,7 @@ static void save_result(
     const char *password,
     int length
 ) {
-    #pragma omp critical(brute_save_result)
+    #pragma omp critical(brute_save_result) // ensure only 1 thread can write result
     {
         if (!(*found_flag)) {
             *found_flag = 1;
@@ -193,7 +138,6 @@ static void save_result(
     }
 }
 
-/* Doc co dung (tim thay hoac nguoi dung bam Stop) */
 static inline int should_stop_now(volatile int *found_flag, const BruteProgress *progress) {
     int f = 0;
     #pragma omp atomic read
@@ -209,7 +153,7 @@ static inline int should_stop_now(volatile int *found_flag, const BruteProgress 
     return 0;
 }
 
-/* Cong don so lan thu tu bien local cua tung luong vao bo dem chung */
+// Logging & Debugging
 static inline void flush_attempts(
     unsigned long long *local_attempts,
     unsigned long long *total_attempts,
@@ -229,7 +173,6 @@ static inline void flush_attempts(
     }
 }
 
-/* Ghi 1 diem du lieu (time_sec, attempts) cho do thi tang truong (chi goi tu 1 luong) */
 static inline void trace_append(ModeTrace *trace, double time_sec, unsigned long long attempts, int force_final) {
     if (!trace) return;
     if (time_sec < 0.0) time_sec = 0.0;
@@ -243,7 +186,6 @@ static inline void trace_append(ModeTrace *trace, double time_sec, unsigned long
         return;
     }
 
-    /* Tranh ghi trung lap y het diem ngay truoc do */
     if (trace->count > 0) {
         TraceSample *prev = &trace->samples[trace->count - 1];
         if (!force_final && prev->attempts == attempts && (time_sec - prev->time_sec) < 1e-6) {
@@ -276,9 +218,7 @@ static inline void trace_maybe_sample(
     }
 }
 
-/* ----------------------------------------------------------------------------
- * 3. Chay 1 muc do dai L theo tung che do lap lich OpenMP
- * ---------------------------------------------------------------------------- */
+// Sequential
 static void run_length_sequential(
     const BruteConfig *config,
     int L,
@@ -347,7 +287,7 @@ static void run_length_parallel(
         int tid = omp_get_thread_num();
 
         if (mode == EXEC_MODE_STATIC) {
-            #pragma omp for schedule(static, chunk)
+            #pragma omp for schedule(static)
             for (long long idx = 0; idx < total; idx++) {
                 if (stop_local) continue;
                 if ((local_attempts & ATTEMPTS_FLUSH_MASK) == 0) {

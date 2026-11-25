@@ -263,7 +263,6 @@ static void create_ui_controls(HWND hwnd, HINSTANCE hInst) {
 
     g_app.max_cpu_threads = omp_get_max_threads();
     if (g_app.max_cpu_threads < 1) g_app.max_cpu_threads = 4;
-    g_app.physical_cores = brute_get_physical_cores();
     g_app.chart_mode = CHART_MODE_GROWTH;
 
     HWND h;
@@ -419,26 +418,21 @@ static void create_ui_controls(HWND hwnd, HINSTANCE hInst) {
         420, 10, 526, 190, hwnd, NULL, hInst, NULL);
     SendMessageA(h, WM_SETFONT, (WPARAM)g_app.font_bold, TRUE);
 
-    const struct { const char *name; int val_id; const char *def_val; int is_mono; int y; } rows[6] = {
+    const struct { const char *name; int val_id; const char *def_val; int is_mono; int y; } rows[] = {
         { "Status:",          IDC_VAL_STATUS,       "Ready", 0, 36  },
         { "Password Found:",  IDC_VAL_PASSWORD,     "-",     1, 62  },
         { "Attempts:",        IDC_VAL_ATTEMPTS,     "-",     1, 88  },
         { "Elapsed Time:",    IDC_VAL_ELAPSED,      "-",     1, 114 },
-        { "Current Length:",  IDC_VAL_CUR_LENGTH,   "-",     0, 140 },
-        { "Hash Backend:",    IDC_VAL_HASH_BACKEND, "",      0, 166 }
+        { "Current Length:",  IDC_VAL_CUR_LENGTH,   "-",     0, 140 }
     };
 
-    for (int i = 0; i < 6; i++) {
+    for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
         h = CreateWindowExA(0, "STATIC", rows[i].name,
             WS_CHILD | WS_VISIBLE,
             436, rows[i].y, 128, 20, hwnd, NULL, hInst, NULL);
         SendMessageA(h, WM_SETFONT, (WPARAM)g_app.font_regular, TRUE);
 
-        const char *init_text = (rows[i].val_id == IDC_VAL_HASH_BACKEND)
-            ? hash_backend_name()
-            : rows[i].def_val;
-
-        CreateWindowExA(0, "STATIC", init_text,
+        CreateWindowExA(0, "STATIC", rows[i].def_val,
             WS_CHILD | WS_VISIBLE | SS_LEFT | SS_ENDELLIPSIS,
             568, rows[i].y, 364, 20, hwnd, (HMENU)(INT_PTR)rows[i].val_id, hInst, NULL);
 

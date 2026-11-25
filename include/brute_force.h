@@ -41,9 +41,6 @@ void brute_force_run_mode(
 /* Tra ve ten hien thi cua tung che do chay */
 const char *exec_mode_name(ExecMode mode);
 
-/* Lay so nhan vat ly (physical cores) cua CPU (fallback omp_get_max_threads) */
-int brute_get_physical_cores(void);
-
 /* Tu dong de xuat so luong OpenMP toi uu dua tren so nhan CPU & khong gian tim kiem */
 int brute_recommend_threads(int charset_len, int max_length);
 

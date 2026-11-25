@@ -5,10 +5,6 @@
 #include <openssl/md5.h>
 #include <openssl/sha.h>
 
-const char *hash_backend_name(void) {
-    return "OpenSSL (libcrypto)";
-}
-
 int hash_digest_length(HashAlgo algo) {
     return (algo == HASH_ALGO_SHA1) ? SHA1_DIGEST_BYTES : MD5_DIGEST_BYTES;
 }

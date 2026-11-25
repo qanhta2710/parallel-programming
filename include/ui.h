@@ -42,7 +42,6 @@
 #define IDC_VAL_ATTEMPTS        303
 #define IDC_VAL_ELAPSED         304
 #define IDC_VAL_CUR_LENGTH      305
-#define IDC_VAL_HASH_BACKEND    306
 
 /* Control IDs - Khu vuc 4: Performance Benchmark & Chart */
 #define IDC_LIST_BENCHMARK      401
