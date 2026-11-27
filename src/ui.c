@@ -14,16 +14,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ============================================================================
- * [KHUNG CODE / FRAMEWORK] Giao dien Win32 API thuan
- * Gom cac khu vuc:
- *   1. Input Configuration (Algo, Charset, Target Hash, Max Length)
- *   2. OpenMP Configuration (Mode, Auto/Manual Threads, Chunk Size, Start/Stop/Reset)
- *   3. Execution & Result (Status, Password, Attempts, Time, Current L)
- *   4. Performance Benchmark (Bang so sanh Time / Speedup / Efficiency)
- *   5. Performance Visualization (Do thi duong tang truong & Speedup/Efficiency)
- * ============================================================================ */
-
 #define MAIN_WND_CLASS   "BruteForceOpenMPMainWnd"
 #define MAIN_WND_STYLE   (WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN)
 
