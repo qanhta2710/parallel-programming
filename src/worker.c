@@ -2,7 +2,6 @@
 #include "brute_force.h"
 
 #include <stdlib.h>
-#include <string.h>
 
 static void post_mode_result(HWND hwnd, const BruteResult *res) {
     BruteResult *copy = (BruteResult *)malloc(sizeof(BruteResult));
@@ -26,7 +25,7 @@ static DWORD WINAPI worker_thread_proc(LPVOID param) {
         };
 
         for (int i = 0; i < 4; i++) {
-            if (ctx->progress.stop_requested) {
+            if (atomic_load_explicit(&ctx->progress.stop_requested, memory_order_relaxed)) {
                 final_status = RUN_STATUS_STOPPED;
                 break;
             }
@@ -57,14 +56,20 @@ static DWORD WINAPI worker_thread_proc(LPVOID param) {
         }
     }
 
-    ctx->is_running = 0;
     PostMessageA(ctx->hwnd_target, WM_APP_ALL_DONE, (WPARAM)final_status, 0);
     return 0;
 }
 
 void worker_init(WorkerContext *ctx, HWND hwnd_target) {
-    memset(ctx, 0, sizeof(*ctx));
     ctx->hwnd_target = hwnd_target;
+    ctx->config = (BruteConfig){0};
+    ctx->thread_handle = NULL;
+    ctx->is_running = 0;
+    atomic_init(&ctx->progress.stop_requested, 0);
+    atomic_init(&ctx->progress.current_length, 0);
+    atomic_init(&ctx->progress.active_mode, 0);
+    atomic_init(&ctx->progress.attempts, 0);
+    atomic_init(&ctx->progress.start_time, 0.0);
 }
 
 int worker_start(WorkerContext *ctx, const BruteConfig *config) {
@@ -72,36 +77,26 @@ int worker_start(WorkerContext *ctx, const BruteConfig *config) {
         return 0;
     }
 
-    /* Don dep handle cu neu con */
-    if (ctx->thread_handle) {
-        CloseHandle(ctx->thread_handle);
-        ctx->thread_handle = NULL;
-    }
-
     ctx->config = *config;
-    memset(&ctx->progress, 0, sizeof(ctx->progress));
-    ctx->progress.stop_requested = 0;
-    ctx->progress.active_mode    = (int)config->mode;
-    ctx->is_running              = 1;
+    atomic_store_explicit(&ctx->progress.stop_requested, 0, memory_order_relaxed);
+    atomic_store_explicit(&ctx->progress.current_length, 0, memory_order_relaxed);
+    atomic_store_explicit(&ctx->progress.active_mode, (int)config->mode, memory_order_relaxed);
+    atomic_store_explicit(&ctx->progress.attempts, 0, memory_order_relaxed);
+    atomic_store_explicit(&ctx->progress.start_time, 0.0, memory_order_relaxed);
 
     ctx->thread_handle = CreateThread(NULL, 0, worker_thread_proc, ctx, 0, NULL);
-    if (!ctx->thread_handle) {
-        ctx->is_running = 0;
-        return 0;
-    }
-    return 1;
+    ctx->is_running = (ctx->thread_handle != NULL);
+    return ctx->is_running;
 }
 
 void worker_request_stop(WorkerContext *ctx) {
     if (!ctx || !ctx->is_running) return;
-    ctx->progress.stop_requested = 1;
+    atomic_store_explicit(&ctx->progress.stop_requested, 1, memory_order_relaxed);
 }
 
 void worker_cleanup(WorkerContext *ctx) {
     if (!ctx) return;
-    if (ctx->is_running) {
-        ctx->progress.stop_requested = 1;
-    }
+    worker_request_stop(ctx);
     if (ctx->thread_handle) {
         WaitForSingleObject(ctx->thread_handle, INFINITE);
         CloseHandle(ctx->thread_handle);

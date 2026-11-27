@@ -12,8 +12,9 @@ typedef struct {
     HWND hwnd_target;
     BruteConfig config;
     BruteProgress progress;
+    /* Chi luong UI quan ly handle va trang thai giua worker_start va worker_cleanup. */
     HANDLE thread_handle;
-    volatile int is_running;
+    int is_running;
 } WorkerContext;
 
 /* Khoi tao WorkerContext */
