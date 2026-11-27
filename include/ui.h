@@ -4,11 +4,12 @@
 #include <windows.h>
 
 /* ============================================================================
- * Giao dien Win32 API thuan (4 khu vuc theo mockup tai lieu)
+ * Giao dien Win32 API thuan (5 khu vuc)
  * - Khu vuc 1: Input Configuration (Algo, Charset, Target Hash, Max Length)
  * - Khu vuc 2: OpenMP Configuration (Mode, Threads, Chunk Size, Start/Stop/Reset)
  * - Khu vuc 3: Execution & Result (Status, Password, Attempts, Time, Current L)
  * - Khu vuc 4: Performance Benchmark (Bang so sanh Time / Speedup / Efficiency)
+ * - Khu vuc 5: Performance Chart (Do thi rong ben duoi)
  * ============================================================================ */
 
 /* Timer ID cap nhat tien do real-time len UI */
