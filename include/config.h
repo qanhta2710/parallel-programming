@@ -1,13 +1,8 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#include <stdatomic.h>
 #include <stdint.h>
-
-/* ============================================================================
- * Cau hinh chung cho ung dung Brute Force Password (C + OpenMP + Win32)
- * [KHUNG CODE / FRAMEWORK] - Quang Anh co the kiem tra va dieu chinh cac hang so
- * hoac bo sung truong du lieu can thiet trong file nay.
- * ============================================================================ */
 
 #define APP_TITLE              "Password Brute Force - OpenMP"
 #define MAX_CHARSET_LEN        128
@@ -24,13 +19,11 @@
 #define MAX_HASH_HEX_LEN       64
 #define MAX_TRACE_SAMPLES      128
 
-/* Thuat toan bam duoc ho tro */
 typedef enum {
     HASH_ALGO_MD5  = 0,
     HASH_ALGO_SHA1 = 1
 } HashAlgo;
 
-/* Che do chay OpenMP */
 typedef enum {
     EXEC_MODE_SEQUENTIAL = 0,
     EXEC_MODE_STATIC     = 1,
@@ -77,11 +70,11 @@ typedef struct {
 
 /* Tien do chia se giua worker/OpenMP va UI (cap nhat dinh ky qua WM_TIMER) */
 typedef struct {
-    volatile int stop_requested;       /* UI dat = 1 khi nguoi dung bam Stop */
-    volatile int current_length;       /* Do dai L dang duyet */
-    volatile int active_mode;          /* ExecMode dang chay (huu ich khi Benchmark) */
-    volatile unsigned long long attempts;
-    double start_time;                 /* omp_get_wtime() luc bat dau */
+    atomic_int stop_requested;         /* UI dat = 1 khi nguoi dung bam Stop */
+    atomic_int current_length;         /* Do dai L dang duyet */
+    atomic_int active_mode;            /* ExecMode dang chay (huu ich khi Benchmark) */
+    atomic_ullong attempts;
+    _Atomic double start_time;         /* omp_get_wtime() luc bat dau */
 } BruteProgress;
 
 /* Ket qua sau khi chay 1 che do */

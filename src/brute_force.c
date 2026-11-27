@@ -123,40 +123,30 @@ static inline int check_password(
 
 static void save_result(
     BruteResult *result,
-    volatile int *found_flag,
+    atomic_int *found_flag,
     const char *password,
     int length
 ) {
     #pragma omp critical(brute_save_result) // ensure only 1 thread can write result
     {
-        if (!(*found_flag)) {
-            *found_flag = 1;
+        if (!atomic_load_explicit(found_flag, memory_order_relaxed)) {
             result->found = 1;
             result->found_length = length;
             memcpy(result->password, password, (size_t)length + 1);
+            atomic_store_explicit(found_flag, 1, memory_order_relaxed);
         }
     }
 }
 
-static inline int should_stop_now(volatile int *found_flag, const BruteProgress *progress) {
-    int f = 0;
-    #pragma omp atomic read
-    f = *found_flag;
-    if (f) return 1;
-
-    if (progress) {
-        int s = 0;
-        #pragma omp atomic read
-        s = progress->stop_requested;
-        if (s) return 1;
-    }
-    return 0;
+static inline int should_stop_now(const atomic_int *found_flag, const BruteProgress *progress) {
+    return atomic_load_explicit(found_flag, memory_order_relaxed) ||
+           (progress && atomic_load_explicit(&progress->stop_requested, memory_order_relaxed));
 }
 
 // Logging & Debugging
 static inline void flush_attempts(
     unsigned long long *local_attempts,
-    unsigned long long *total_attempts,
+    atomic_ullong *total_attempts,
     BruteProgress *progress
 ) {
     if (*local_attempts == 0) return;
@@ -164,12 +154,10 @@ static inline void flush_attempts(
     unsigned long long delta = *local_attempts;
     *local_attempts = 0;
 
-    #pragma omp atomic
-    *total_attempts += delta;
+    atomic_fetch_add_explicit(total_attempts, delta, memory_order_relaxed);
 
     if (progress) {
-        #pragma omp atomic
-        progress->attempts += delta;
+        atomic_fetch_add_explicit(&progress->attempts, delta, memory_order_relaxed);
     }
 }
 
@@ -206,13 +194,11 @@ static inline void trace_maybe_sample(
     ModeTrace *trace,
     double t_start,
     double *last_sample_t,
-    unsigned long long *total_attempts
+    const atomic_ullong *total_attempts
 ) {
     double now = omp_get_wtime();
     if (now - *last_sample_t >= TRACE_SAMPLE_DT) {
-        unsigned long long snap = 0;
-        #pragma omp atomic read
-        snap = *total_attempts;
+        unsigned long long snap = atomic_load_explicit(total_attempts, memory_order_relaxed);
         trace_append(trace, now - t_start, snap, 0);
         *last_sample_t = now;
     }
@@ -227,8 +213,8 @@ static void run_length_sequential(
     double *last_sample_t,
     BruteProgress *progress,
     BruteResult *result,
-    volatile int *found_flag,
-    unsigned long long *total_attempts
+    atomic_int *found_flag,
+    atomic_ullong *total_attempts
 ) {
     char password[MAX_PASSWORD_LEN + 1];
     uint8_t digest[MAX_DIGEST_BYTES];
@@ -238,7 +224,7 @@ static void run_length_sequential(
         if ((local_attempts & ATTEMPTS_FLUSH_MASK) == 0) {
             flush_attempts(&local_attempts, total_attempts, progress);
             trace_maybe_sample(&result->trace, t_start, last_sample_t, total_attempts);
-            if (progress && progress->stop_requested) {
+            if (should_stop_now(found_flag, progress)) {
                 break;
             }
         }
@@ -265,19 +251,12 @@ static void run_length_parallel(
     double *last_sample_t,
     BruteProgress *progress,
     BruteResult *result,
-    volatile int *found_flag,
-    unsigned long long *total_attempts
+    atomic_int *found_flag,
+    atomic_ullong *total_attempts
 ) {
     int threads = (config->num_threads > 0) ? config->num_threads : 1;
     int chunk   = (config->chunk_size > 0)  ? config->chunk_size  : DEFAULT_CHUNK_SIZE;
 
-    /* NOTE CHO QUANG ANH:
-     * Khung code tach ro 3 block schedule(static/dynamic/guided) de de doc va
-     * de so sanh khi bao cao. Ket thuc vung `#pragma omp parallel` co san
-     * barrier dong bo giua cac muc do dai L.
-     *
-     * Chi thread 0 ghi mau thoi gian (trace_maybe_sample) de khong gay tranh
-     * chap lock va khong lam cham toc do song song. */
     #pragma omp parallel num_threads(threads)
     {
         char password[MAX_PASSWORD_LEN + 1];
@@ -287,6 +266,7 @@ static void run_length_parallel(
         int tid = omp_get_thread_num();
 
         if (mode == EXEC_MODE_STATIC) {
+            // Static
             #pragma omp for schedule(static)
             for (long long idx = 0; idx < total; idx++) {
                 if (stop_local) continue;
@@ -311,6 +291,7 @@ static void run_length_parallel(
                 }
             }
         } else if (mode == EXEC_MODE_DYNAMIC) {
+            // Dynamic
             #pragma omp for schedule(dynamic, chunk)
             for (long long idx = 0; idx < total; idx++) {
                 if (stop_local) continue;
@@ -334,7 +315,8 @@ static void run_length_parallel(
                     stop_local = 1;
                 }
             }
-        } else { /* EXEC_MODE_GUIDED */
+        } else { 
+            // Guided
             #pragma omp for schedule(guided, chunk)
             for (long long idx = 0; idx < total; idx++) {
                 if (stop_local) continue;
@@ -361,12 +343,9 @@ static void run_length_parallel(
         }
 
         flush_attempts(&local_attempts, total_attempts, progress);
-    } /* Implicit OpenMP barrier tai day truoc khi sang do dai L + 1 */
+    }
 }
-
-/* ----------------------------------------------------------------------------
- * 4. Ham chinh chay 1 che do brute force (duoc goi tu worker thread)
- * ---------------------------------------------------------------------------- */
+// Main function
 void brute_force_run_mode(
     const BruteConfig *config,
     ExecMode mode,
@@ -380,8 +359,8 @@ void brute_force_run_mode(
         return;
     }
 
-    volatile int found_flag = 0;
-    unsigned long long total_attempts = 0;
+    atomic_int found_flag = 0;
+    atomic_ullong total_attempts = 0;
     double t_start = omp_get_wtime();
     double last_sample_t = t_start;
 
@@ -389,25 +368,24 @@ void brute_force_run_mode(
     trace_append(&result->trace, 0.0, 0, 0);
 
     if (progress) {
-        progress->active_mode    = (int)mode;
-        progress->current_length = 1;
-        progress->attempts       = 0;
-        progress->start_time     = t_start;
+        atomic_store_explicit(&progress->start_time, t_start, memory_order_relaxed);
+        atomic_store_explicit(&progress->attempts, 0, memory_order_relaxed);
+        atomic_store_explicit(&progress->current_length, 1, memory_order_relaxed);
+        atomic_store_explicit(&progress->active_mode, (int)mode, memory_order_relaxed);
     }
 
-    /* Vong lap ngoai cung duyet tuan tu do dai L = 1 .. max_length (trang 5) */
+    // Length loop for
     for (int L = 1; L <= config->max_length; L++) {
-        if (found_flag || (progress && progress->stop_requested)) {
+        if (should_stop_now(&found_flag, progress)) {
             break;
         }
 
         if (progress) {
-            progress->current_length = L;
+            atomic_store_explicit(&progress->current_length, L, memory_order_relaxed);
         }
 
         unsigned long long total_u64 = safe_power_u64(config->charset_len, L);
         if (total_u64 == 0) {
-            /* Khong gian tim kiem vuot gioi han 64-bit */
             break;
         }
 
@@ -421,17 +399,17 @@ void brute_force_run_mode(
                                 progress, result, &found_flag, &total_attempts);
         }
 
-        /* Ghi 1 diem moc sau moi muc do dai L */
         double now = omp_get_wtime();
-        trace_append(&result->trace, now - t_start, total_attempts, 0);
+        trace_append(&result->trace, now - t_start,
+                     atomic_load_explicit(&total_attempts, memory_order_relaxed), 0);
         last_sample_t = now;
     }
 
     double t_end = omp_get_wtime();
     result->elapsed_sec = t_end - t_start;
-    result->attempts    = total_attempts;
-    result->stopped     = (progress && progress->stop_requested && !result->found) ? 1 : 0;
+    result->attempts    = atomic_load_explicit(&total_attempts, memory_order_relaxed);
+    result->stopped     = !result->found && progress &&
+                          atomic_load_explicit(&progress->stop_requested, memory_order_relaxed);
 
-    /* Diem ket thuc chinh xac cho do thi */
     trace_append(&result->trace, result->elapsed_sec, result->attempts, 1);
 }

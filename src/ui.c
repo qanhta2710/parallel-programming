@@ -662,10 +662,12 @@ static void handle_algo_changed(HWND hwnd, HashAlgo new_algo) {
 static void handle_progress_timer(HWND hwnd) {
     if (!g_app.worker.is_running) return;
 
-    unsigned long long att = g_app.worker.progress.attempts;
-    int cur_len            = g_app.worker.progress.current_length;
-    ExecMode act_mode      = (ExecMode)g_app.worker.progress.active_mode;
-    double elapsed         = omp_get_wtime() - g_app.worker.progress.start_time;
+    const BruteProgress *progress = &g_app.worker.progress;
+    unsigned long long att = atomic_load_explicit(&progress->attempts, memory_order_relaxed);
+    int cur_len = atomic_load_explicit(&progress->current_length, memory_order_relaxed);
+    ExecMode act_mode = (ExecMode)atomic_load_explicit(&progress->active_mode, memory_order_relaxed);
+    double start_time = atomic_load_explicit(&progress->start_time, memory_order_relaxed);
+    double elapsed = (start_time != 0.0) ? omp_get_wtime() - start_time : 0.0;
     if (elapsed < 0.0) elapsed = 0.0;
 
     char buf[64];
