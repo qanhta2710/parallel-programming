@@ -19,14 +19,32 @@
  * Gom cac khu vuc:
  *   1. Input Configuration (Algo, Charset, Target Hash, Max Length)
  *   2. OpenMP Configuration (Mode, Auto/Manual Threads, Chunk Size, Start/Stop/Reset)
- *   3. Execution & Result (Status, Password, Attempts, Time, Current L, Backend)
+ *   3. Execution & Result (Status, Password, Attempts, Time, Current L)
  *   4. Performance Benchmark (Bang so sanh Time / Speedup / Efficiency)
  *   5. Performance Visualization (Do thi duong tang truong & Speedup/Efficiency)
  * ============================================================================ */
 
 #define MAIN_WND_CLASS   "BruteForceOpenMPMainWnd"
-#define CLIENT_WIDTH     960
-#define CLIENT_HEIGHT    676
+#define MAIN_WND_STYLE   (WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN)
+
+enum {
+    CLIENT_WIDTH = 960,
+    CLIENT_HEIGHT = 720,
+    MIN_CLIENT_WIDTH = 850,
+    MIN_CLIENT_HEIGHT = 600,
+    PANEL_TOP = 10,
+    PANEL_MARGIN = 14,
+    PANEL_INSET = 16,
+    LEFT_PANEL_WIDTH = 392,
+    INPUT_HEIGHT = 170,
+    RIGHT_PANEL_X = 420,
+    RESULT_HEIGHT = 168,
+    RESULT_VALUE_X = 568,
+    BENCH_TOP = 188,
+    BENCH_HEIGHT = 196,
+    CHART_TOP = BENCH_TOP + BENCH_HEIGHT + 10,
+    CHART_CANVAS_TOP = CHART_TOP + 48
+};
 
 typedef struct {
     HWND hwnd;
@@ -91,6 +109,88 @@ static void update_status_bar(HWND hwnd, const char *text) {
     if (sb) {
         SendMessageA(sb, SB_SETTEXTA, 0, (LPARAM)text);
     }
+}
+
+static void resize_control(HWND control, int width, int height) {
+    SetWindowPos(control, NULL, 0, 0, width, height,
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS);
+}
+
+static int chart_panel_bottom(HWND hwnd, int client_height) {
+    RECT status_client = {0};
+    GetClientRect(GetDlgItem(hwnd, IDC_STATUS_BAR), &status_client);
+    return client_height - status_client.bottom - 10;
+}
+
+static void layout_ui(HWND hwnd) {
+    HWND status = GetDlgItem(hwnd, IDC_STATUS_BAR);
+    if (!status) return;
+
+    SendMessageA(status, WM_SIZE, 0, 0);
+    RECT client;
+    GetClientRect(hwnd, &client);
+
+    int right_edge = client.right - PANEL_MARGIN;
+    int right_width = right_edge - RIGHT_PANEL_X;
+    int chart_bottom = chart_panel_bottom(hwnd, client.bottom);
+    if (right_edge <= RESULT_VALUE_X + PANEL_INSET || chart_bottom <= CHART_CANVAS_TOP + 12) return;
+
+    const int result_ids[] = {
+        IDC_VAL_STATUS, IDC_VAL_PASSWORD, IDC_VAL_ATTEMPTS, IDC_VAL_ELAPSED, IDC_VAL_CUR_LENGTH
+    };
+    for (size_t i = 0; i < sizeof(result_ids) / sizeof(result_ids[0]); ++i) {
+        resize_control(GetDlgItem(hwnd, result_ids[i]), right_edge - PANEL_INSET - RESULT_VALUE_X, 20);
+    }
+
+    HWND list = GetDlgItem(hwnd, IDC_LIST_BENCHMARK);
+    resize_control(list, right_width - 2 * PANEL_INSET, BENCH_HEIGHT - 40);
+    RECT list_client = {0};
+    GetClientRect(list, &list_client);
+    int column_width = list_client.right / 4;
+    for (int i = 0; i < 3; ++i) {
+        ListView_SetColumnWidth(list, i, column_width);
+    }
+    ListView_SetColumnWidth(list, 3, list_client.right - 3 * column_width);
+
+    int chart_width = right_edge - PANEL_MARGIN;
+    resize_control(GetDlgItem(hwnd, IDC_CHART_CANVAS), chart_width - 2 * PANEL_INSET,
+                   chart_bottom - CHART_CANVAS_TOP - 12);
+}
+
+static void paint_panel_background(HWND hwnd, HDC dc) {
+    RECT client;
+    GetClientRect(hwnd, &client);
+    FillRect(dc, &client, GetSysColorBrush(COLOR_BTNFACE));
+
+    int left_edge = PANEL_MARGIN + LEFT_PANEL_WIDTH;
+    int right_edge = client.right - PANEL_MARGIN;
+    const RECT frames[] = {
+        { PANEL_MARGIN, PANEL_TOP + 10, left_edge, PANEL_TOP + INPUT_HEIGHT },
+        { PANEL_MARGIN, BENCH_TOP + 10, left_edge, BENCH_TOP + BENCH_HEIGHT },
+        { RIGHT_PANEL_X, PANEL_TOP + 10, right_edge, PANEL_TOP + RESULT_HEIGHT },
+        { RIGHT_PANEL_X, BENCH_TOP + 10, right_edge, BENCH_TOP + BENCH_HEIGHT },
+        { PANEL_MARGIN, CHART_TOP + 10, right_edge, chart_panel_bottom(hwnd, client.bottom) }
+    };
+    HBRUSH border = GetSysColorBrush(COLOR_3DSHADOW);
+    for (size_t i = 0; i < sizeof(frames) / sizeof(frames[0]); ++i) {
+        FrameRect(dc, &frames[i], border);
+    }
+}
+
+static void create_panel_title(HWND hwnd, HINSTANCE instance, const char *text, int x, int y) {
+    SIZE size = {230, 0};
+    HDC dc = GetDC(hwnd);
+    if (dc) {
+        HGDIOBJ old_font = SelectObject(dc, g_app.font_bold);
+        GetTextExtentPoint32A(dc, text, (int)strlen(text), &size);
+        SelectObject(dc, old_font);
+        ReleaseDC(hwnd, dc);
+    }
+
+    HWND title = CreateWindowExA(0, "STATIC", text,
+        WS_CHILD | WS_VISIBLE | SS_CENTER | SS_NOPREFIX,
+        x + 8, y, size.cx + 8, 20, hwnd, NULL, instance, NULL);
+    SendMessageA(title, WM_SETFONT, (WPARAM)g_app.font_bold, TRUE);
 }
 
 /* Cap nhat thanh truot & nhan Number of Threads theo trang thai Auto / Manual */
@@ -270,10 +370,7 @@ static void create_ui_controls(HWND hwnd, HINSTANCE hInst) {
     /* ========================================================================
      * KHU VUC 1: Input Configuration (cot trai - tren)
      * ======================================================================== */
-    h = CreateWindowExA(0, "BUTTON", "1. Input Configuration",
-        WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-        14, 10, 392, 246, hwnd, NULL, hInst, NULL);
-    SendMessageA(h, WM_SETFONT, (WPARAM)g_app.font_bold, TRUE);
+    create_panel_title(hwnd, hInst, "1. Input Configuration", PANEL_MARGIN, PANEL_TOP);
 
     h = CreateWindowExA(0, "STATIC", "Hash Algorithm:",
         WS_CHILD | WS_VISIBLE,
@@ -293,65 +390,57 @@ static void create_ui_controls(HWND hwnd, HINSTANCE hInst) {
 
     h = CreateWindowExA(0, "STATIC", "Charset:",
         WS_CHILD | WS_VISIBLE | WS_GROUP,
-        28, 68, 360, 18, hwnd, NULL, hInst, NULL);
+        28, 64, 72, 18, hwnd, NULL, hInst, NULL);
     SendMessageA(h, WM_SETFONT, (WPARAM)g_app.font_regular, TRUE);
 
     CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", APP_DEFAULT_CHARSET,
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-        28, 88, 362, 26, hwnd, (HMENU)IDC_EDIT_CHARSET, hInst, NULL);
+        104, 60, 286, 26, hwnd, (HMENU)IDC_EDIT_CHARSET, hInst, NULL);
     set_ctrl_font(hwnd, IDC_EDIT_CHARSET, g_app.font_mono);
 
     h = CreateWindowExA(0, "STATIC", "Target Hash (Hex):",
         WS_CHILD | WS_VISIBLE,
-        28, 124, 360, 18, hwnd, NULL, hInst, NULL);
+        28, 90, 360, 18, hwnd, NULL, hInst, NULL);
     SendMessageA(h, WM_SETFONT, (WPARAM)g_app.font_regular, TRUE);
 
     CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", DEFAULT_MD5_HASH,
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-        28, 144, 362, 26, hwnd, (HMENU)IDC_EDIT_TARGET_HASH, hInst, NULL);
+        28, 109, 362, 26, hwnd, (HMENU)IDC_EDIT_TARGET_HASH, hInst, NULL);
     set_ctrl_font(hwnd, IDC_EDIT_TARGET_HASH, g_app.font_mono);
 
     h = CreateWindowExA(0, "STATIC", "Maximum Password Length:",
         WS_CHILD | WS_VISIBLE,
-        28, 182, 210, 20, hwnd, NULL, hInst, NULL);
+        28, 146, 180, 20, hwnd, NULL, hInst, NULL);
     SendMessageA(h, WM_SETFONT, (WPARAM)g_app.font_regular, TRUE);
 
     CreateWindowExA(0, "STATIC", "6 chars",
         WS_CHILD | WS_VISIBLE | SS_RIGHT,
-        284, 182, 106, 20, hwnd, (HMENU)IDC_LABEL_MAXLEN_VAL, hInst, NULL);
+        334, 146, 56, 20, hwnd, (HMENU)IDC_LABEL_MAXLEN_VAL, hInst, NULL);
     set_ctrl_font(hwnd, IDC_LABEL_MAXLEN_VAL, g_app.font_bold);
 
     HWND sl_maxlen = CreateWindowExA(0, TRACKBAR_CLASSA, "",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | TBS_AUTOTICKS | TBS_HORZ,
-        24, 206, 368, 34, hwnd, (HMENU)IDC_SLIDER_MAXLEN, hInst, NULL);
+        210, 140, 122, 30, hwnd, (HMENU)IDC_SLIDER_MAXLEN, hInst, NULL);
     SendMessageA(sl_maxlen, TBM_SETRANGE, TRUE, MAKELONG(1, 8));
     SendMessageA(sl_maxlen, TBM_SETPOS, TRUE, DEFAULT_MAX_LENGTH);
 
     /* ========================================================================
      * KHU VUC 2: OpenMP Configuration (cot trai - duoi)
      * ======================================================================== */
-    h = CreateWindowExA(0, "BUTTON", "2. OpenMP Configuration",
-        WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-        14, 264, 392, 378, hwnd, NULL, hInst, NULL);
-    SendMessageA(h, WM_SETFONT, (WPARAM)g_app.font_bold, TRUE);
+    create_panel_title(hwnd, hInst, "2. OpenMP Configuration", PANEL_MARGIN, BENCH_TOP);
 
-    h = CreateWindowExA(0, "STATIC", "Execution Mode:",
-        WS_CHILD | WS_VISIBLE,
-        28, 290, 150, 18, hwnd, NULL, hInst, NULL);
-    SendMessageA(h, WM_SETFONT, (WPARAM)g_app.font_regular, TRUE);
-
-    const struct { int id; const char *label; int y; } mode_radios[5] = {
-        { IDC_RADIO_MODE_SEQ,     "Sequential (Single Thread)",    314 },
-        { IDC_RADIO_MODE_STATIC,  "Static Scheduling",             340 },
-        { IDC_RADIO_MODE_DYNAMIC, "Dynamic Scheduling",            366 },
-        { IDC_RADIO_MODE_GUIDED,  "Guided Scheduling",             392 },
-        { IDC_RADIO_MODE_BENCH,   "Run All Modes (Benchmark)",     418 }
+    const struct { int id; const char *label; int x; int y; int width; } mode_radios[5] = {
+        { IDC_RADIO_MODE_SEQ,     "Sequential (Single Thread)",    28, 212, 188 },
+        { IDC_RADIO_MODE_STATIC,  "Static Scheduling",           222, 212, 168 },
+        { IDC_RADIO_MODE_DYNAMIC, "Dynamic Scheduling",           28, 236, 188 },
+        { IDC_RADIO_MODE_GUIDED,  "Guided Scheduling",           222, 236, 168 },
+        { IDC_RADIO_MODE_BENCH,   "Run All Modes (Benchmark)",     28, 260, 250 }
     };
     for (int i = 0; i < 5; i++) {
         DWORD style = WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON;
         if (i == 0) style |= (WS_GROUP | WS_TABSTOP);
         CreateWindowExA(0, "BUTTON", mode_radios[i].label,
-            style, 34, mode_radios[i].y, 340, 22,
+            style, mode_radios[i].x, mode_radios[i].y, mode_radios[i].width, 22,
             hwnd, (HMENU)(INT_PTR)mode_radios[i].id, hInst, NULL);
         set_ctrl_font(hwnd, mode_radios[i].id, g_app.font_regular);
     }
@@ -360,63 +449,61 @@ static void create_ui_controls(HWND hwnd, HINSTANCE hInst) {
     /* Number of Threads + Auto checkbox */
     h = CreateWindowExA(0, "STATIC", "Number of Threads:",
         WS_CHILD | WS_VISIBLE | WS_GROUP,
-        28, 456, 134, 20, hwnd, NULL, hInst, NULL);
+        28, 288, 134, 20, hwnd, NULL, hInst, NULL);
     SendMessageA(h, WM_SETFONT, (WPARAM)g_app.font_regular, TRUE);
 
     CreateWindowExA(0, "BUTTON", "Auto",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
-        166, 454, 62, 22, hwnd, (HMENU)IDC_CHK_AUTO_THREADS, hInst, NULL);
+        166, 286, 62, 22, hwnd, (HMENU)IDC_CHK_AUTO_THREADS, hInst, NULL);
     set_ctrl_font(hwnd, IDC_CHK_AUTO_THREADS, g_app.font_regular);
     SendDlgItemMessageA(hwnd, IDC_CHK_AUTO_THREADS, BM_SETCHECK, BST_CHECKED, 0);
 
     CreateWindowExA(0, "STATIC", "",
         WS_CHILD | WS_VISIBLE | SS_RIGHT,
-        232, 456, 158, 20, hwnd, (HMENU)IDC_LABEL_THREADS_VAL, hInst, NULL);
+        232, 288, 158, 20, hwnd, (HMENU)IDC_LABEL_THREADS_VAL, hInst, NULL);
     set_ctrl_font(hwnd, IDC_LABEL_THREADS_VAL, g_app.font_bold);
 
     HWND sl_threads = CreateWindowExA(0, TRACKBAR_CLASSA, "",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | TBS_AUTOTICKS | TBS_HORZ,
-        24, 480, 368, 34, hwnd, (HMENU)IDC_SLIDER_THREADS, hInst, NULL);
+        24, 308, 222, 30, hwnd, (HMENU)IDC_SLIDER_THREADS, hInst, NULL);
     SendMessageA(sl_threads, TBM_SETRANGE, TRUE, MAKELONG(1, g_app.max_cpu_threads));
     sync_threads_ui(hwnd);
 
     /* Chunk Size */
     h = CreateWindowExA(0, "STATIC", "Chunk Size:",
         WS_CHILD | WS_VISIBLE,
-        28, 530, 95, 22, hwnd, NULL, hInst, NULL);
+        252, 313, 76, 22, hwnd, NULL, hInst, NULL);
     SendMessageA(h, WM_SETFONT, (WPARAM)g_app.font_regular, TRUE);
 
     char chunk_buf[32];
     snprintf(chunk_buf, sizeof(chunk_buf), "%d", DEFAULT_CHUNK_SIZE);
     CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", chunk_buf,
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_NUMBER,
-        125, 527, 120, 26, hwnd, (HMENU)IDC_EDIT_CHUNK_SIZE, hInst, NULL);
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_NUMBER | ES_AUTOHSCROLL,
+        330, 309, 60, 26, hwnd, (HMENU)IDC_EDIT_CHUNK_SIZE, hInst, NULL);
     set_ctrl_font(hwnd, IDC_EDIT_CHUNK_SIZE, g_app.font_mono);
 
     /* Cac nut dieu khien: Start / Stop / Reset */
     CreateWindowExA(0, "BUTTON", "Start",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-        28, 586, 114, 34, hwnd, (HMENU)IDC_BTN_START, hInst, NULL);
+        28, 345, 114, 30, hwnd, (HMENU)IDC_BTN_START, hInst, NULL);
     set_ctrl_font(hwnd, IDC_BTN_START, g_app.font_bold);
 
     CreateWindowExA(0, "BUTTON", "Stop",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        152, 586, 114, 34, hwnd, (HMENU)IDC_BTN_STOP, hInst, NULL);
+        152, 345, 114, 30, hwnd, (HMENU)IDC_BTN_STOP, hInst, NULL);
     set_ctrl_font(hwnd, IDC_BTN_STOP, g_app.font_regular);
     EnableWindow(GetDlgItem(hwnd, IDC_BTN_STOP), FALSE);
 
     CreateWindowExA(0, "BUTTON", "Reset",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        276, 586, 114, 34, hwnd, (HMENU)IDC_BTN_RESET, hInst, NULL);
+        276, 345, 114, 30, hwnd, (HMENU)IDC_BTN_RESET, hInst, NULL);
     set_ctrl_font(hwnd, IDC_BTN_RESET, g_app.font_regular);
 
     /* ========================================================================
      * KHU VUC 3: Execution & Result (cot phai - tren)
      * ======================================================================== */
-    h = CreateWindowExA(0, "BUTTON", "3. Execution & Result",
-        WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-        420, 10, 526, 190, hwnd, NULL, hInst, NULL);
-    SendMessageA(h, WM_SETFONT, (WPARAM)g_app.font_bold, TRUE);
+    int right_width = CLIENT_WIDTH - PANEL_MARGIN - RIGHT_PANEL_X;
+    create_panel_title(hwnd, hInst, "3. Execution and Result", RIGHT_PANEL_X, PANEL_TOP);
 
     const struct { const char *name; int val_id; const char *def_val; int is_mono; int y; } rows[] = {
         { "Status:",          IDC_VAL_STATUS,       "Ready", 0, 36  },
@@ -429,12 +516,13 @@ static void create_ui_controls(HWND hwnd, HINSTANCE hInst) {
     for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
         h = CreateWindowExA(0, "STATIC", rows[i].name,
             WS_CHILD | WS_VISIBLE,
-            436, rows[i].y, 128, 20, hwnd, NULL, hInst, NULL);
+            RIGHT_PANEL_X + PANEL_INSET, rows[i].y, 128, 20, hwnd, NULL, hInst, NULL);
         SendMessageA(h, WM_SETFONT, (WPARAM)g_app.font_regular, TRUE);
 
         CreateWindowExA(0, "STATIC", rows[i].def_val,
             WS_CHILD | WS_VISIBLE | SS_LEFT | SS_ENDELLIPSIS,
-            568, rows[i].y, 364, 20, hwnd, (HMENU)(INT_PTR)rows[i].val_id, hInst, NULL);
+            RESULT_VALUE_X, rows[i].y, CLIENT_WIDTH - PANEL_MARGIN - PANEL_INSET - RESULT_VALUE_X, 20,
+            hwnd, (HMENU)(INT_PTR)rows[i].val_id, hInst, NULL);
 
         HFONT f = rows[i].is_mono ? g_app.font_mono :
                   (rows[i].val_id == IDC_VAL_STATUS ? g_app.font_bold : g_app.font_regular);
@@ -444,56 +532,53 @@ static void create_ui_controls(HWND hwnd, HINSTANCE hInst) {
     /* ========================================================================
      * KHU VUC 4: Performance Benchmark (cot phai - giua)
      * ======================================================================== */
-    h = CreateWindowExA(0, "BUTTON", "4. Performance Benchmark",
-        WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-        420, 208, 526, 166, hwnd, NULL, hInst, NULL);
-    SendMessageA(h, WM_SETFONT, (WPARAM)g_app.font_bold, TRUE);
+    create_panel_title(hwnd, hInst, "4. Performance Benchmark", RIGHT_PANEL_X, BENCH_TOP);
 
     HWND lv = CreateWindowExA(WS_EX_CLIENTEDGE, WC_LISTVIEWA, "",
         WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_NOSORTHEADER,
-        436, 234, 494, 126, hwnd, (HMENU)IDC_LIST_BENCHMARK, hInst, NULL);
+        RIGHT_PANEL_X + PANEL_INSET, BENCH_TOP + 26, right_width - 2 * PANEL_INSET, BENCH_HEIGHT - 40,
+        hwnd, (HMENU)IDC_LIST_BENCHMARK, hInst, NULL);
     SendMessageA(lv, WM_SETFONT, (WPARAM)g_app.font_regular, TRUE);
     ListView_SetExtendedListViewStyle(lv, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
 
-    const struct { const char *title; int width; int fmt; } cols[4] = {
-        { "Mode",       128, LVCFMT_LEFT  },
-        { "Time (s)",   120, LVCFMT_RIGHT },
-        { "Speedup",    120, LVCFMT_RIGHT },
-        { "Efficiency", 120, LVCFMT_RIGHT }
+    const struct { const char *title; int fmt; } cols[4] = {
+        { "Mode",       LVCFMT_LEFT  },
+        { "Time (s)",   LVCFMT_RIGHT },
+        { "Speedup",    LVCFMT_RIGHT },
+        { "Efficiency", LVCFMT_RIGHT }
     };
     for (int i = 0; i < 4; i++) {
         LVCOLUMNA col;
         memset(&col, 0, sizeof(col));
-        col.mask    = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
+        col.mask    = LVCF_TEXT | LVCF_FMT;
         col.fmt     = cols[i].fmt;
-        col.cx      = cols[i].width;
         col.pszText = (LPSTR)cols[i].title;
         ListView_InsertColumn(lv, i, &col);
     }
     init_benchmark_table(hwnd);
 
     /* ========================================================================
-     * KHU VUC 5: Performance Visualization - Do thi duong (cot phai - duoi)
+     * KHU VUC 5: Performance Chart (ben duoi ca hai cot)
      * ======================================================================== */
-    h = CreateWindowExA(0, "BUTTON", "5. Performance Chart",
-        WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-        420, 382, 526, 260, hwnd, NULL, hInst, NULL);
-    SendMessageA(h, WM_SETFONT, (WPARAM)g_app.font_bold, TRUE);
+    int chart_width = CLIENT_WIDTH - 2 * PANEL_MARGIN;
+    int chart_inner_x = PANEL_MARGIN + PANEL_INSET;
+    create_panel_title(hwnd, hInst, "5. Performance Chart", PANEL_MARGIN, CHART_TOP);
 
     CreateWindowExA(0, "BUTTON", "Growth Curve (Attempts / Time)",
         WS_CHILD | WS_VISIBLE | WS_GROUP | WS_TABSTOP | BS_AUTORADIOBUTTON,
-        436, 405, 225, 20, hwnd, (HMENU)IDC_RADIO_CHART_GROWTH, hInst, NULL);
+        chart_inner_x, CHART_TOP + 23, 225, 20, hwnd, (HMENU)IDC_RADIO_CHART_GROWTH, hInst, NULL);
     set_ctrl_font(hwnd, IDC_RADIO_CHART_GROWTH, g_app.font_regular);
 
-    CreateWindowExA(0, "BUTTON", "Speedup & Efficiency Trend",
+    CreateWindowExA(0, "BUTTON", "Speedup and Efficiency Trend",
         WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
-        674, 405, 220, 20, hwnd, (HMENU)IDC_RADIO_CHART_SPEEDUP, hInst, NULL);
+        chart_inner_x + 238, CHART_TOP + 23, 220, 20, hwnd, (HMENU)IDC_RADIO_CHART_SPEEDUP, hInst, NULL);
     set_ctrl_font(hwnd, IDC_RADIO_CHART_SPEEDUP, g_app.font_regular);
     SendDlgItemMessageA(hwnd, IDC_RADIO_CHART_GROWTH, BM_SETCHECK, BST_CHECKED, 0);
 
     CreateWindowExA(0, CHART_WND_CLASS, "",
         WS_CHILD | WS_VISIBLE | WS_GROUP,
-        436, 430, 494, 200, hwnd, (HMENU)IDC_CHART_CANVAS, hInst, NULL);
+        chart_inner_x, CHART_CANVAS_TOP, chart_width - 2 * PANEL_INSET, 200,
+        hwnd, (HMENU)IDC_CHART_CANVAS, hInst, NULL);
     refresh_chart(hwnd);
 
     /* ========================================================================
@@ -744,6 +829,7 @@ static LRESULT CALLBACK main_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
             g_app.hwnd = hwnd;
             worker_init(&g_app.worker, hwnd);
             create_ui_controls(hwnd, hInst);
+            layout_ui(hwnd);
             return 0;
         }
 
@@ -806,11 +892,40 @@ static LRESULT CALLBACK main_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
             handle_all_done(hwnd, (RunStatus)wParam);
             return 0;
 
-        case WM_SIZE: {
-            HWND sb = GetDlgItem(hwnd, IDC_STATUS_BAR);
-            if (sb) SendMessageA(sb, WM_SIZE, 0, 0);
+        case WM_GETMINMAXINFO: {
+            MINMAXINFO *info = (MINMAXINFO *)lParam;
+            RECT min_size = { 0, 0, MIN_CLIENT_WIDTH, MIN_CLIENT_HEIGHT };
+            AdjustWindowRectEx(&min_size, MAIN_WND_STYLE, FALSE, 0);
+            info->ptMinTrackSize.x = min_size.right - min_size.left;
+            info->ptMinTrackSize.y = min_size.bottom - min_size.top;
             return 0;
         }
+
+        case WM_SIZE:
+            if (wParam != SIZE_MINIMIZED) {
+                layout_ui(hwnd);
+                RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+            }
+            return 0;
+
+        case WM_ERASEBKGND:
+            return 1;
+
+        case WM_PAINT: {
+            PAINTSTRUCT paint;
+            HDC dc = BeginPaint(hwnd, &paint);
+            paint_panel_background(hwnd, dc);
+            EndPaint(hwnd, &paint);
+            return 0;
+        }
+
+        case WM_PRINTCLIENT:
+            paint_panel_background(hwnd, (HDC)wParam);
+            return 0;
+
+        case WM_CTLCOLORSTATIC:
+            SetBkColor((HDC)wParam, GetSysColor(COLOR_BTNFACE));
+            return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
 
         case WM_CLOSE:
             KillTimer(hwnd, IDT_PROGRESS_TIMER);
@@ -848,7 +963,6 @@ int ui_run(HINSTANCE hInstance, int nCmdShow) {
     wc.hInstance     = hInstance;
     wc.hIcon         = LoadIconA(NULL, IDI_APPLICATION);
     wc.hCursor       = LoadCursorA(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     wc.lpszClassName = MAIN_WND_CLASS;
 
     if (!RegisterClassExA(&wc)) {
@@ -856,19 +970,22 @@ int ui_run(HINSTANCE hInstance, int nCmdShow) {
         return 1;
     }
 
-    DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     RECT rc = { 0, 0, CLIENT_WIDTH, CLIENT_HEIGHT };
-    AdjustWindowRectEx(&rc, style, FALSE, 0);
+    AdjustWindowRectEx(&rc, MAIN_WND_STYLE, FALSE, 0);
     int wnd_w = rc.right - rc.left;
     int wnd_h = rc.bottom - rc.top;
 
-    int scr_w = GetSystemMetrics(SM_CXSCREEN);
-    int scr_h = GetSystemMetrics(SM_CYSCREEN);
-    int pos_x = (scr_w - wnd_w) / 2;
-    int pos_y = (scr_h - wnd_h) / 2;
+    RECT work_area = { 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN) };
+    SystemParametersInfoA(SPI_GETWORKAREA, 0, &work_area, 0);
+    int work_w = work_area.right - work_area.left;
+    int work_h = work_area.bottom - work_area.top;
+    if (wnd_w > work_w) wnd_w = work_w;
+    if (wnd_h > work_h) wnd_h = work_h;
+    int pos_x = work_area.left + (work_w - wnd_w) / 2;
+    int pos_y = work_area.top + (work_h - wnd_h) / 2;
 
     HWND hwnd = CreateWindowExA(
-        0, MAIN_WND_CLASS, APP_TITLE, style,
+        0, MAIN_WND_CLASS, APP_TITLE, MAIN_WND_STYLE,
         pos_x, pos_y, wnd_w, wnd_h,
         NULL, NULL, hInstance, NULL
     );
